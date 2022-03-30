@@ -1,0 +1,73 @@
+#!/bin/bash -x
+exec 2>/must-gather/bash-x
+OUTDIR="/must-gather"
+OC=/usr/bin/oc 
+
+mkdir -p $OUTDIR
+
+
+
+CONTROLLER=$($OC get po -n special-resource-operator -o custom-columns=NAME:.metadata.name --no-headers 2> /dev/null)
+
+$OC logs  -n special-resource-operator $CONTROLLER > $OUTDIR/controller.log
+$OC describe po  -n special-resource-operator $CONTROLLER > $OUTDIR/controller.describe
+$OC get -o yaml po -n special-resource-operator $CONTROLLER > $OUTDIR/controller.yaml
+
+$OC get specialresources.sro.openshift.io --all-namespaces -o custom-columns=NAME:.metadata.name,NAMESPACE:.spec.namespace --no-headers 2> /dev/null > $OUTDIR/specialresources
+#SPECIALRESOURCES=$($OC get specialresources.sro.openshift.io --all-namespaces -o custom-columns=NAME:.metadata.name,NAMESPACE:.spec.namespace --no-headers 2> /dev/null)
+
+
+IFS=$'\n'
+
+for SRNAMESPACE in $($OC get specialresources.sro.openshift.io --all-namespaces -o custom-columns=NAMESPACE:.spec.namespace --no-headers); do 
+	#SRNAME = $(echo $SR | awk '{print $1}')
+	#SRNAMESPACE = $(echo $SR | awk '{print $2}')
+
+	mkdir -p ${OUTDIR}/${SRNAMESPACE} 
+	$OC get all,cm,secrets -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/all_resourcees
+
+
+#	for i in $($OC get all,cm -n $SRNAMESPACE --no-headers | awk '{print $1}'); do
+#		TYPE=$(echo $i | cut -d"/" -f1)
+#		NAME=$(echo $i | cut -d"/" -f2)
+#		$OC describe $i -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME.describe
+#		$OC get -o yaml $i -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME.yaml
+#		if [ "$TYPE" == "pod" ]; then
+#			$OC logs $i -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME.describe
+#
+#			#$OC exec -ti -n $SRNAMESPACE $NAME lsmod
+#			$OC get all,cm -n simple-kmod  -o custom-columns=KIND:.kind,NAME:.metadata.name,PHASE:.status.phase  --no-headers
+#
+#		fi
+#	done
+
+
+
+	for i in $($OC get all,cm -n $SRNAMESPACE -o custom-columns=KIND:.kind,NAME:.metadata.name,PHASE:.status.phase  --no-headers); do 
+		TYPE=$(echo $i | awk '{print $1}')
+		NAME=$(echo $i | awk '{print $2}')
+		PHASE=$(echo $i | awk '{print $3}')
+		mkdir -p $OUTDIR/$SRNAMESPACE/$NAME
+		$OC describe $TYPE $NAME -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME/describe
+		$OC get -o yaml $TYPE $NAME -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME/$NAME.yaml
+		if [ "$TYPE" == "Pod" ]; then
+			$OC logs $NAME -n $SRNAMESPACE > $OUTDIR/$SRNAMESPACE/$NAME/$NAME.log
+
+			if [ "$PHASE" == "Running" ]; then
+				$OC exec -ti -n $SRNAMESPACE $NAME lsmod >  $OUTDIR/$SRNAMESPACE/$NAME/lsmod
+				#$OC exec -ti -n $SRNAMESPACE $NAME modinfo  >  $OUTDIR/$SRNAMESPACE/$NAME/
+
+				for i in $($OC exec -ti -n $SRNAMESPACE $NAME -- systemctl --no-pager | awk '/kmods-via-containers/{print $1}'); do
+					$OC exec -ti -n $SRNAMESPACE $NAME -- systemctl status $i >> $OUTDIR/$SRNAMESPACE/$NAME/kvc
+				done
+
+			fi
+		fi
+
+	done
+done
+
+
+
+
+
